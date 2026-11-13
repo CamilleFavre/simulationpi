@@ -1,0 +1,154 @@
+---
+title: "Estimation de π par Monte Carlo — version interactive"
+format:
+  html:
+    toc: true
+lang: fr
+---
+
+## Principe (rappel)
+
+On tire $N$ points uniformément dans le carré $[0,1]\times[0,1]$. Un point $(x,y)$
+est dans le cercle inscrit (centre $(0{,}5;0{,}5)$, rayon $0{,}5$) si
+$(x-0{,}5)^2+(y-0{,}5)^2 \le 0{,}25$. On définit $K$ le nombre de points dans le cercle, il y a donc $N-K$ points qui ne sont pas dans le cercle mais dans le carré.
+
+La probabilité pour un point d'être dans le cercle est donc $\frac{\text{Aire du cercle}}{\text{Aire du carré}} = \frac{\pi \cdot \text{rayon}^2}{1} = \pi \cdot 0.5^2 = \frac{\pi}{4}$
+
+Chaque point est une Bernoulli de paramètre $p = \pi/4$, donc l'estimateur
+$\hat{\pi} = 4K/N$ est sans biais (en effet $\mathbb{E}(\hat{\pi}) = 4 \cdot \mathbb{E}\left(\frac{K}{N}\right) = 4 \cdot \frac{\pi}{4} = \pi$), d'erreur standard
+$\mathrm{SE} = 4\sqrt{\hat p(1-\hat p)/N}$ (convergence en $1/\sqrt N$), avec un
+intervalle de confiance à 95 % $\hat\pi \pm 1{,}96\,\mathrm{SE}$.
+
+Tout le calcul se fait **dans le navigateur** (Observable JS) : déplace le curseur
+**N** pour changer le nombre de points, change la **seed** pour un nouveau tirage.
+
+## Simulation interactive
+
+```{ojs}
+//| echo: false
+viewof n = Inputs.range([100, 1000000], {step: 100, value: 10000, label: "Nombre de points N"})
+```
+
+```{ojs}
+//| echo: false
+viewof seed = Inputs.range([1, 9999], {step: 1, value: 42, label: "Seed (change pour relancer le tirage)"})
+```
+
+```{ojs}
+//| echo: false
+{
+  // PRNG reproductible (mulberry32)
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rand = mulberry32(seed);
+  const xs = new Float64Array(n);
+  const ys = new Float64Array(n);
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    const x = rand(), y = rand();
+    xs[i] = x; ys[i] = y;
+    if ((x - 0.5) ** 2 + (y - 0.5) ** 2 <= 0.25) k++;
+  }
+  const p = k / n;
+  const piHat = 4 * p;
+  const se = 4 * Math.sqrt(p * (1 - p) / n);
+  const lo = piHat - 1.96 * se, hi = piHat + 1.96 * se;
+  const fr = v => v.toLocaleString("fr-FR");
+
+  // --- Canvas 1 : carré, cercle et points ---
+  const S = 460, pad = 20, W = S + 2 * pad;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = W;
+  canvas.style.border = "1px solid #ccc";
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, W);
+  ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
+  ctx.strokeRect(pad, pad, S, S);
+  ctx.beginPath();
+  ctx.arc(pad + S / 2, pad + S / 2, S / 2, 0, 2 * Math.PI);
+  ctx.strokeStyle = "#555"; ctx.lineWidth = 1.5; ctx.stroke();
+  const maxDraw = 20000;
+  const step = Math.max(1, Math.floor(n / maxDraw));
+  for (let i = 0; i < n; i += step) {
+    const inside = (xs[i] - 0.5) ** 2 + (ys[i] - 0.5) ** 2 <= 0.25;
+    ctx.fillStyle = inside ? "rgba(70,130,180,0.55)" : "rgba(255,99,71,0.45)";
+    ctx.fillRect(pad + xs[i] * S - 1, pad + ys[i] * S - 1, 2, 2);
+  }
+
+  // --- Canvas 2 : convergence de pi_hat_m = 4*K_m/m ---
+  const m = Math.min(n, 200000);
+  const C_W = 460, C_H = 200;
+  const c2 = document.createElement("canvas");
+  c2.width = C_W; c2.height = C_H;
+  c2.style.border = "1px solid #ccc";
+  const g = c2.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, C_W, C_H);
+  const piCum = new Float64Array(m);
+  let run = 0, mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < m; i++) {
+    if ((xs[i] - 0.5) ** 2 + (ys[i] - 0.5) ** 2 <= 0.25) run++;
+    piCum[i] = 4 * run / (i + 1);
+    if (piCum[i] < mn) mn = piCum[i];
+    if (piCum[i] > mx) mx = piCum[i];
+  }
+  const padY = 0.05 * (mx - mn || 1);
+  mn -= padY; mx += padY;
+  const yOf = v => C_H - (v - mn) / (mx - mn) * C_H;
+  g.beginPath(); g.moveTo(0, yOf(Math.PI)); g.lineTo(C_W, yOf(Math.PI));
+  g.strokeStyle = "red"; g.setLineDash([5, 4]); g.lineWidth = 1.5; g.stroke();
+  g.setLineDash([]);
+  g.beginPath();
+  for (let i = 0; i < m; i++) {
+    const X = i / (m - 1) * C_W, Y = yOf(piCum[i]);
+    if (i === 0) g.moveTo(X, Y); else g.lineTo(X, Y);
+  }
+  g.strokeStyle = "steelblue"; g.lineWidth = 1; g.stroke();
+
+  // --- Panneau de statistiques ---
+  const stats = htl.html`<div style="font-family: ui-monospace, monospace; font-size: 15px; line-height: 1.7">
+    <div><b>N</b> = ${fr(n)} &nbsp;·&nbsp; <b>K (dans le cercle)</b> = ${fr(k)} &nbsp;·&nbsp; p̂ = ${p.toFixed(6)}</div>
+    <div style="font-size: 22px"><b>π̂ = 4K/N = ${piHat.toFixed(6)}</b></div>
+    <div>π = ${Math.PI.toFixed(6)} &nbsp;·&nbsp; erreur absolue = ${Math.abs(piHat - Math.PI).toFixed(6)}</div>
+    <div>SE = ${se.toFixed(6)} &nbsp;·&nbsp; IC 95 % = [${lo.toFixed(6)} ; ${hi.toFixed(6)}]
+      ${lo <= Math.PI && Math.PI <= hi ? "✅ contient π" : "❌ ne contient pas π"}</div>
+    <div style="margin-top: 6px">
+      <span style="color: steelblue">■</span> dans le cercle &nbsp;
+      <span style="color: tomato">■</span> hors du cercle
+      ${n > maxDraw ? ` — affichage d'un échantillon de ${fr(Math.ceil(n / step))} points` : ""}
+    </div>
+  </div>`;
+
+  const cap = document.createElement("div");
+  cap.style.cssText = "font-size: 12px; color: #666; margin-top: 4px";
+  cap.textContent = "Convergence de π̂_m = 4·K_m/m (rouge pointillé : π réel)";
+
+  const right = document.createElement("div");
+  right.appendChild(stats);
+  right.appendChild(document.createElement("br"));
+  right.appendChild(c2);
+  right.appendChild(cap);
+  const left = document.createElement("div");
+  left.appendChild(canvas);
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start";
+  wrap.appendChild(left);
+  wrap.appendChild(right);
+  return wrap;
+}
+```
+
+## Lecture des résultats
+
+- Le **curseur N** rejoue toute la simulation : quand $N$ augmente, $\hat\pi$ se
+  rapproche de π et l'intervalle de confiance se resserre, tous deux en $1/\sqrt N$.
+- La courbe de convergence montre la **loi des grands nombres** : les fluctuations
+  de $\hat\pi_m$ s'amortissent quand $m$ grandit.
+- Avec la seed fixée, les résultats sont **reproductibles** ; change la seed pour
+  explorer la variabilité d'un tirage à l'autre.
+
